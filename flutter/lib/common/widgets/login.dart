@@ -143,11 +143,6 @@ class _WidgetOPState extends State<WidgetOP> {
   String _url = '';
 
   @override
-  void initState() {
-    super.initState();
-  }
-
-  @override
   void dispose() {
     super.dispose();
     _updateTimer?.cancel();
@@ -390,8 +385,7 @@ class LoginWidgetUserPass extends StatelessWidget {
 
 const kAuthReqTypeOidc = 'oidc/';
 
-/// common login dialog for desktop
-/// call this directly
+// call this directly
 Future<bool?> loginDialog() async {
   var username =
       TextEditingController(text: UserModel.getLocalUserInfo()?['name'] ?? '');
@@ -456,12 +450,13 @@ Future<bool?> loginDialog() async {
           }
           if (isEmailVerification != null) {
             if (isMobile) {
-              if (close != null) close(false);
-              verificationCodeDialog(resp.user, isEmailVerification);
+              if (close != null) close(null);
+              verificationCodeDialog(
+                  resp.user, resp.secret, isEmailVerification);
             } else {
               setState(() => isInProgress = false);
-              final res =
-                  await verificationCodeDialog(resp.user, isEmailVerification);
+              final res = await verificationCodeDialog(
+                  resp.user, resp.secret, isEmailVerification);
               if (res == true) {
                 if (close != null) close(false);
                 return;
@@ -611,7 +606,7 @@ Future<bool?> loginDialog() async {
 }
 
 Future<bool?> verificationCodeDialog(
-    UserPayload? user, bool isEmailVerification) async {
+    UserPayload? user, String? secret, bool isEmailVerification) async {
   var autoLogin = true;
   var isInProgress = false;
   String? errorText;
@@ -626,6 +621,7 @@ Future<bool?> verificationCodeDialog(
         final resp = await gFFI.userModel.login(LoginRequest(
             verificationCode: code.text,
             tfaCode: isEmailVerification ? null : code.text,
+            secret: secret,
             username: user?.name,
             id: await bind.mainGetMyId(),
             uuid: await bind.mainGetUuid(),
@@ -711,6 +707,11 @@ Future<bool?> verificationCodeDialog(
           dialogButton("Verify", onPressed: getOnSubmit()),
         ]);
   });
+  // For verification code, desktop update other models in login dialog, mobile need to close login dialog first,
+  // otherwise the soft keyboard will jump out on each key press, so mobile update in verification code dialog.
+  if (isMobile && res == true) {
+    await UserModel.updateOtherModels();
+  }
 
   return res;
 }
