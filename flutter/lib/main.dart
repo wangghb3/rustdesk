@@ -36,6 +36,7 @@ WindowType? kWindowType;
 late List<String> kBootArgs;
 
 Future<void> main(List<String> args) async {
+  earlyAssert();
   WidgetsFlutterBinding.ensureInitialized();
 
   debugPrint("launch args: $args");
@@ -119,6 +120,7 @@ Future<void> initEnv(String appType) async {
 void runMainApp(bool startService) async {
   // register uni links
   await initEnv(kAppTypeMain);
+  checkUpdate();
   // trigger connection status updater
   await bind.mainCheckConnectStatus();
   if (startService) {
@@ -131,7 +133,8 @@ void runMainApp(bool startService) async {
   runApp(App());
 
   // Set window option.
-  WindowOptions windowOptions = getHiddenTitleBarWindowOptions();
+  WindowOptions windowOptions =
+      getHiddenTitleBarWindowOptions(isMainWindow: true);
   windowManager.waitUntilReadyToShow(windowOptions, () async {
     // Restore the location of the main window before window hide or show.
     await restoreWindowPosition(WindowType.Main);
@@ -155,13 +158,14 @@ void runMainApp(bool startService) async {
 
 void runMobileApp() async {
   await initEnv(kAppTypeMain);
+  checkUpdate();
   if (isAndroid) androidChannelInit();
   if (isAndroid) platformFFI.syncAndroidServiceAppDirConfigPath();
   draggablePositions.load();
   await Future.wait([gFFI.abModel.loadCache(), gFFI.groupModel.loadCache()]);
   gFFI.userModel.refreshCurrentUser();
   runApp(App());
-  if (!isWeb) await initUniLinks();
+  await initUniLinks();
 }
 
 void runMultiWindow(
@@ -351,7 +355,10 @@ void runInstallPage() async {
 }
 
 WindowOptions getHiddenTitleBarWindowOptions(
-    {Size? size, bool center = false, bool? alwaysOnTop}) {
+    {bool isMainWindow = false,
+    Size? size,
+    bool center = false,
+    bool? alwaysOnTop}) {
   var defaultTitleBarStyle = TitleBarStyle.hidden;
   // we do not hide titlebar on win7 because of the frame overflow.
   if (kUseCompatibleUiMode) {
@@ -360,7 +367,7 @@ WindowOptions getHiddenTitleBarWindowOptions(
   return WindowOptions(
     size: size,
     center: center,
-    backgroundColor: Colors.transparent,
+    backgroundColor: (isMacOS && isMainWindow) ? null : Colors.transparent,
     skipTaskbar: false,
     titleBarStyle: defaultTitleBarStyle,
     alwaysOnTop: alwaysOnTop,
@@ -444,7 +451,9 @@ class _AppState extends State<App> with WidgetsBindingObserver {
         child: GetMaterialApp(
           navigatorKey: globalKey,
           debugShowCheckedModeBanner: false,
-          title: 'RustDesk',
+          title: isWeb
+              ? '${bind.mainGetAppNameSync()} Web Client V2 (Preview)'
+              : bind.mainGetAppNameSync(),
           theme: MyTheme.lightTheme,
           darkTheme: MyTheme.darkTheme,
           themeMode: MyTheme.currentThemeMode(),
@@ -475,13 +484,15 @@ class _AppState extends State<App> with WidgetsBindingObserver {
               : (context, child) {
                   child = _keepScaleBuilder(context, child);
                   child = botToastBuilder(context, child);
-                  if (isDesktop && desktopType == DesktopType.main) {
+                  if ((isDesktop && desktopType == DesktopType.main) ||
+                      isWebDesktop) {
                     child = keyListenerBuilder(context, child);
                   }
                   if (isLinux) {
-                    child = buildVirtualWindowFrame(context, child);
+                    return buildVirtualWindowFrame(context, child);
+                  } else {
+                    return workaroundWindowBorder(context, child);
                   }
-                  return child;
                 },
         ),
       );
@@ -503,7 +514,7 @@ _registerEventHandler() {
     platformFFI.registerEventHandler('theme', 'theme', (evt) async {
       String? dark = evt['dark'];
       if (dark != null) {
-        MyTheme.changeDarkMode(MyTheme.themeModeFromString(dark));
+        await MyTheme.changeDarkMode(MyTheme.themeModeFromString(dark));
       }
     });
     platformFFI.registerEventHandler('language', 'language', (_) async {
